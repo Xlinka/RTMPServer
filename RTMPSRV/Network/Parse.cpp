@@ -48,108 +48,136 @@ bool Parse::perform_handshake(SOCKET client_socket) {
     return true;
 }
 
-// Function to parse RTMP packet data
 size_t Parse::parse_rtmp_packet(const char* data, std::size_t length, SOCKET client_socket) {
     if (length < 1) {
         std::cerr << "Packet too small to be an RTMP command." << std::endl;
         return 0;
     }
+
     size_t initial_length = length;
+    size_t total_consumed = 0;
 
-    // Debugging: Print the entire RTMP packet in hex
-    Parses::dump_hex(data, length);
+    // Loop to handle multiple chunks in the data
+    while (total_consumed < length) {
+        const char* current_data = data + total_consumed;
+        size_t remaining_length = length - total_consumed;
 
-    // Extract the fmt and csid fields from the first byte
-    unsigned char fmt = (data[0] & 0xC0) >> 6;
-    unsigned int csid = (data[0] & 0x3F);
+        // Check if we have enough data for at least the basic header
+        if (remaining_length < 1) {
+            break; // Not enough data
+        }
 
-    int header_index = 1;
-    if (csid == 0) {
-        csid = 64 + (unsigned char)data[1];
-        header_index++;
-    } else if (csid == 1) {
-        csid = 64 + (unsigned char)data[1] + ((unsigned char)data[2]) * 256;
-        header_index += 2;
+        // Extract fmt and csid from the basic header
+        unsigned char fmt = (current_data[0] & 0xC0) >> 6;
+        unsigned int csid = (current_data[0] & 0x3F);
+        size_t header_index = 1;
+
+        if (csid == 0) {
+            if (remaining_length < 2) {
+                break; // Not enough data
+            }
+            csid = 64 + (unsigned char)current_data[1];
+            header_index++;
+        } else if (csid == 1) {
+            if (remaining_length < 3) {
+                break; // Not enough data
+            }
+            csid = 64 + (unsigned char)current_data[1] + ((unsigned char)current_data[2]) * 256;
+            header_index += 2;
+        }
+
+        // Determine the header size and fields based on fmt
+        unsigned int timestamp = 0;
+        unsigned int message_length = 0;
+        unsigned char message_type_id = 0;
+        unsigned int message_stream_id = 0;
+        size_t header_size = header_index;
+
+        if (fmt <= 2) {
+            size_t required_header_size = header_index + (fmt == 0 ? 11 : (fmt == 1 ? 7 : 3));
+            if (remaining_length < required_header_size) {
+                break; // Not enough data
+            }
+
+            // Parse timestamp, message length, message type ID
+            timestamp = ((unsigned char)current_data[header_index]) << 16 |
+                        ((unsigned char)current_data[header_index + 1]) << 8 |
+                        ((unsigned char)current_data[header_index + 2]);
+            header_index += 3;
+
+            if (fmt <= 1) {
+                message_length = ((unsigned char)current_data[header_index]) << 16 |
+                                 ((unsigned char)current_data[header_index + 1]) << 8 |
+                                 ((unsigned char)current_data[header_index + 2]);
+                message_type_id = (unsigned char)current_data[header_index + 3];
+                header_index += 4;
+
+                if (fmt == 0) {
+                    message_stream_id = ((unsigned char)current_data[header_index]) |
+                                        ((unsigned char)current_data[header_index + 1]) << 8 |
+                                        ((unsigned char)current_data[header_index + 2]) << 16 |
+                                        ((unsigned char)current_data[header_index + 3]) << 24;
+                    header_index += 4;
+                }
+            }
+
+            header_size = header_index;
+        } else if (fmt == 3) {
+            // No header, use cached values (not implemented in this example)
+            header_size = header_index;
+            std::cerr << "RTMP fmt: 3 (no header, continuation packet), skipping." << std::endl;
+            // For a full implementation, you need to maintain previous chunk headers per chunk stream
+            return 0;
+        }
+
+        // Handle extended timestamp
+        if (timestamp == 0xFFFFFF) {
+            if (remaining_length < header_size + 4) {
+                break; // Not enough data
+            }
+            timestamp = ((unsigned char)current_data[header_size]) << 24 |
+                        ((unsigned char)current_data[header_size + 1]) << 16 |
+                        ((unsigned char)current_data[header_size + 2]) << 8 |
+                        ((unsigned char)current_data[header_size + 3]);
+            header_size += 4;
+        }
+
+        // At this point, header_size bytes have been consumed for the header
+        size_t total_message_size = header_size + message_length;
+
+        if (remaining_length < total_message_size) {
+            break; // Not enough data to parse the full message
+        }
+
+        const char* message_body = current_data + header_size;
+
+        // Correctly call methods from ParseControl and ParseAMF
+        switch (message_type_id) {
+            case 0x01:
+                ParseControl::handle_set_chunk_size(message_body, message_length);
+                break;
+            case 0x03:
+                ParseControl::handle_acknowledgement(message_body, message_length);
+                break;
+            case 0x04:
+                ParseControl::handle_user_control_message(message_body, message_length);
+                break;
+            case 0x05:
+                ParseControl::handle_window_ack_size(message_body, message_length);
+                break;
+            case 0x06:
+                ParseControl::handle_set_peer_bandwidth(message_body, message_length);
+                break;
+            case 0x14:
+                ParseAMF::handle_amf_command(message_body, message_length, client_socket);
+                break;
+            default:
+                std::cerr << "Unknown RTMP message type: " << (int)message_type_id << ", skipping." << std::endl;
+                break;
+        }
+
+        total_consumed += total_message_size;
     }
 
-    int header_size = 0;
-    unsigned int timestamp = 0;
-    unsigned int message_length = 0;
-    unsigned char message_type_id = 0;
-    unsigned int message_stream_id = 0;
-
-    // Determine the header size and extract necessary fields
-    if (fmt == 0) {
-        header_size = header_index + 11;
-        timestamp = ((unsigned char)data[header_index]) << 16 |
-                    ((unsigned char)data[header_index + 1]) << 8 |
-                    ((unsigned char)data[header_index + 2]);
-        message_length = ((unsigned char)data[header_index + 3]) << 16 |
-                         ((unsigned char)data[header_index + 4]) << 8 |
-                         ((unsigned char)data[header_index + 5]);
-        message_type_id = (unsigned char)data[header_index + 6];
-        message_stream_id = ((unsigned char)data[header_index + 7]) |
-                            ((unsigned char)data[header_index + 8]) << 8 |
-                            ((unsigned char)data[header_index + 9]) << 16 |
-                            ((unsigned char)data[header_index + 10]) << 24;
-
-    } else if (fmt == 1) {
-        header_size = header_index + 7;
-        timestamp = ((unsigned char)data[header_index]) << 16 |
-                    ((unsigned char)data[header_index + 1]) << 8 |
-                    ((unsigned char)data[header_index + 2]);
-        message_length = ((unsigned char)data[header_index + 3]) << 16 |
-                         ((unsigned char)data[header_index + 4]) << 8 |
-                         ((unsigned char)data[header_index + 5]);
-        message_type_id = (unsigned char)data[header_index + 6];
-
-    } else if (fmt == 2) {
-        header_size = header_index + 3;
-        timestamp = ((unsigned char)data[header_index]) << 16 |
-                    ((unsigned char)data[header_index + 1]) << 8 |
-                    ((unsigned char)data[header_index + 2]);
-
-    } else if (fmt == 3) {
-        header_size = header_index;
-        std::cerr << "RTMP fmt: 3 (no header, continuation packet), skipping." << std::endl;
-        return 0;
-    }
-
-    std::cout << "Timestamp: " << timestamp << ", Message length: " << message_length << std::endl;
-    std::cout << "RTMP message type: " << std::hex << (int)message_type_id << std::dec << std::endl;
-    std::cout << "Message Stream ID: " << message_stream_id << std::endl;
-
-    if (length < header_size + message_length) {
-        std::cerr << "Not enough data for the RTMP message body." << std::endl;
-        return 0;
-    }
-
-    const char* message_body = data + header_size;
-
-    // Correctly call methods from ParseControl and ParseAMF
-    switch (message_type_id) {
-        case 0x01:
-            ParseControl::handle_set_chunk_size(message_body, message_length);
-            break;
-        case 0x03:
-            ParseControl::handle_acknowledgement(message_body, message_length);
-            break;
-        case 0x04:
-            ParseControl::handle_user_control_message(message_body, message_length);
-            break;
-        case 0x05:
-            ParseControl::handle_window_ack_size(message_body, message_length);
-            break;
-        case 0x06:
-            ParseControl::handle_set_peer_bandwidth(message_body, message_length);
-            break;
-        case 0x14:
-            ParseAMF::handle_amf_command(message_body, message_length, client_socket);
-            break;
-        default:
-            std::cerr << "Unknown RTMP message type: " << (int)message_type_id << ", skipping." << std::endl;
-            break;
-    }
-
-    return initial_length;
+    return total_consumed;
 }

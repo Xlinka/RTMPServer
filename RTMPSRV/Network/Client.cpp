@@ -124,27 +124,34 @@ void RTMPServer::handle_client(SOCKET client_socket, const std::string& client_i
     char buffer[BUFFER_SIZE];
     int read_size;
 
+    // Initialize a local buffer to accumulate incoming data
+    std::vector<char> data_buffer;
+
     // Process RTMP packets after handshake
     while ((read_size = recv(client_socket, buffer, BUFFER_SIZE, 0)) > 0) {
         std::lock_guard<std::mutex> lock(log_mutex);
         std::cout << "[handle_client] Received " << read_size << " bytes from client IP: " << client_ip << std::endl;
 
-        // Store received data in the buffer
-        Buffer::store_data(buffer, read_size);
+        // Append received data to the local buffer
+        data_buffer.insert(data_buffer.end(), buffer, buffer + read_size);
 
-        // Retrieve data from the buffer
-        const std::vector<char>& data = Buffer::get_data();
-        std::cout << "[handle_client] Buffer contains " << data.size() << " bytes before parsing." << std::endl;
+        // Process complete RTMP messages from the buffer
+        size_t bytes_processed = 0;
+        while (bytes_processed < data_buffer.size()) {
+            size_t consumed = Parse::parse_rtmp_packet(data_buffer.data() + bytes_processed,
+                                                       data_buffer.size() - bytes_processed,
+                                                       client_socket);
+            if (consumed > 0) {
+                bytes_processed += consumed;
+            } else {
+                // Not enough data to parse a full message, wait for more data
+                break;
+            }
+        }
 
-        // Ensure there is enough data for AMF command handling
-        if (data.size() < 3) {
-            std::cerr << "[handle_client] Not enough data for AMF command, skipping." << std::endl;
-        } else {
-            // Parse AMF commands from the client
-            ParseAMF::handle_amf_command(data.data(), data.size(), client_socket);
-
-            // Clear the buffer after handling
-            Buffer::clear();
+        // Remove processed bytes from the buffer
+        if (bytes_processed > 0) {
+            data_buffer.erase(data_buffer.begin(), data_buffer.begin() + bytes_processed);
         }
     }
 
@@ -160,6 +167,7 @@ void RTMPServer::handle_client(SOCKET client_socket, const std::string& client_i
     closesocket(client_socket);
     std::cout << "[handle_client] Closed client socket for IP: " << client_ip << std::endl;
 }
+
 
 void RTMPServer::stop() {
     std::cout << "[" << current_timestamp() << "] [stop] Stopping RTMP server..." << std::endl;

@@ -13,10 +13,33 @@ void Parses::write_amf_string(const std::string& str, std::vector<char>& buffer)
 
 void Parses::write_amf_number(double value, std::vector<char>& buffer) {
     buffer.push_back(0x00); // AMF0 number type marker
+
+    uint64_t host_double;
+    std::memcpy(&host_double, &value, sizeof(double));
+
+    // Check system endianness
+    uint16_t endian_test = 0x1;
+    bool is_little_endian = *(reinterpret_cast<uint8_t*>(&endian_test)) == 0x1;
+
     uint64_t net_double;
-    memcpy(&net_double, &value, sizeof(double));
-    net_double = htonll(net_double); // Convert to network byte order
-    buffer.insert(buffer.end(), (char*)&net_double, (char*)&net_double + 8);
+    if (is_little_endian) {
+        // Swap bytes from little-endian to big-endian
+        net_double = ((host_double & 0xFF00000000000000ULL) >> 56) |
+                     ((host_double & 0x00FF000000000000ULL) >> 40) |
+                     ((host_double & 0x0000FF0000000000ULL) >> 24) |
+                     ((host_double & 0x000000FF00000000ULL) >> 8) |
+                     ((host_double & 0x00000000FF000000ULL) << 8) |
+                     ((host_double & 0x0000000000FF0000ULL) << 24) |
+                     ((host_double & 0x000000000000FF00ULL) << 40) |
+                     ((host_double & 0x00000000000000FFULL) << 56);
+    } else {
+        net_double = host_double;
+    }
+
+    // Write the 8 bytes to the buffer
+    for (int i = 0; i < 8; ++i) {
+        buffer.push_back(static_cast<char>((net_double >> ((7 - i) * 8)) & 0xFF));
+    }
 }
 
 
@@ -63,15 +86,39 @@ void Parses::dump_hex(const char* data, std::size_t length) {
     printf("\n");
 }
 
-//  read AMF0 number from the data stream
 double Parses::read_amf_number(const char* data) {
     if (data[0] != 0x00) {
         throw std::runtime_error("Expected AMF0 Number");
     }
+
+    // Read the 8 bytes of the double
+    uint64_t net_double;
+    std::memcpy(&net_double, data + 1, sizeof(uint64_t));
+
+    // Check system endianness
+    uint16_t endian_test = 0x1;
+    bool is_little_endian = *(reinterpret_cast<uint8_t*>(&endian_test)) == 0x1;
+
+    uint64_t host_double;
+    if (is_little_endian) {
+        // Swap bytes from big-endian to little-endian
+        host_double = ((net_double & 0xFF00000000000000ULL) >> 56) |
+                      ((net_double & 0x00FF000000000000ULL) >> 40) |
+                      ((net_double & 0x0000FF0000000000ULL) >> 24) |
+                      ((net_double & 0x000000FF00000000ULL) >> 8) |
+                      ((net_double & 0x00000000FF000000ULL) << 8) |
+                      ((net_double & 0x0000000000FF0000ULL) << 24) |
+                      ((net_double & 0x000000000000FF00ULL) << 40) |
+                      ((net_double & 0x00000000000000FFULL) << 56);
+    } else {
+        host_double = net_double;
+    }
+
     double number;
-    std::memcpy(&number, data + 1, 8);  // AMF0 Number is 8 bytes after the marker
+    std::memcpy(&number, &host_double, sizeof(double));
     return number;
 }
+
 
 //  read AMF0 string from the data stream
 std::string Parses::read_amf_string(const char* data, std::size_t& offset) {

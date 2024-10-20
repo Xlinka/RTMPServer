@@ -20,73 +20,72 @@ void ParseAMF::handle_amf_command(const char* data, std::size_t length, SOCKET c
     }
     std::cout << std::endl;
 
-    // Skip RTMP chunk header (basic header + message header)
-    // Basic header is 1 byte for format 0, chunk stream ID 2
-    // Message header is 11 bytes for format 0
-    size_t index = 12;  // Skip past RTMP headers
-    
+    size_t index = 0;  // Start from the beginning of the message body
+
     bool found_command = false;
     std::string command_name;
     double transaction_id = 0.0;
 
-    while (index < length) {
-        uint8_t marker = (unsigned char)data[index];
-        
-        std::cout << "[handle_amf_command] Current marker: " << std::hex << (unsigned int)marker << std::dec << " at index: " << index << std::endl;
-
-        if (marker == 0x02) { // AMF0 string marker
-            index++;
-
-            if (index + 2 > length) {
-                std::cerr << "[handle_amf_command] Error: Not enough data to read string length." << std::endl;
-                return;
-            }
-
-            // Read string length (2 bytes big-endian)
-            uint16_t str_len = (static_cast<unsigned char>(data[index]) << 8) | static_cast<unsigned char>(data[index + 1]);
-            std::cout << "[handle_amf_command] Read string length: " << str_len << " at index: " << index << std::endl;
-            index += 2;
-
-            if (index + str_len > length) {
-                std::cerr << "[handle_amf_command] Error: String length exceeds available data. Str_len: " << str_len 
-                         << " Remaining length: " << (length - index) << std::endl;
-                return;
-            }
-
-            // Extract the string (command name)
-            command_name = std::string(data + index, str_len);
-            std::cout << "[handle_amf_command] Extracted command name: '" << command_name << "' from bytes: ";
-            for (size_t i = index; i < index + str_len; ++i) {
-                printf("%02X ", (unsigned char)data[i]);
-            }
-            std::cout << std::endl;
-
-            found_command = true;
-            index += str_len;
-
-            // Look for transaction ID (should be a number marker 0x00)
-            if (index < length && data[index] == 0x00) {
-                index++; // Skip the number marker
-                if (index + 8 <= length) {
-                    uint64_t transaction_id_network_order;
-                    memcpy(&transaction_id_network_order, data + index, 8);
-                    transaction_id = network_to_host_double(transaction_id_network_order);
-                    std::cout << "[handle_amf_command] Extracted transaction ID: " << transaction_id << std::endl;
-                    index += 8;
-                }
-            }
-            break;
-        }
-        index++;
-    }
-
-    if (!found_command) {
-        std::cerr << "[handle_amf_command] Error: Could not find valid command name" << std::endl;
+    // Read the command name
+    if (index + 1 > length) {
+        std::cerr << "[handle_amf_command] Error: Not enough data to read marker." << std::endl;
         return;
     }
 
-    std::cout << "[handle_amf_command] Final Command name: " << command_name << std::endl;
-    std::cout << "[handle_amf_command] Final Transaction ID: " << transaction_id << std::endl;
+    uint8_t marker = (unsigned char)data[index];
+    std::cout << "[handle_amf_command] Marker: " << std::hex << (unsigned int)marker << std::dec << " at index: " << index << std::endl;
+
+    if (marker == 0x02) { // AMF0 string marker
+        index++;
+
+        if (index + 2 > length) {
+            std::cerr << "[handle_amf_command] Error: Not enough data to read string length." << std::endl;
+            return;
+        }
+
+        // Read string length (2 bytes big-endian)
+        uint16_t str_len = (static_cast<unsigned char>(data[index]) << 8) | static_cast<unsigned char>(data[index + 1]);
+        std::cout << "[handle_amf_command] Read string length: " << str_len << " at index: " << index << std::endl;
+        index += 2;
+
+        if (index + str_len > length) {
+            std::cerr << "[handle_amf_command] Error: String length exceeds available data. Str_len: " << str_len
+                      << " Remaining length: " << (length - index) << std::endl;
+            return;
+        }
+
+        // Extract the string (command name)
+        command_name = std::string(data + index, str_len);
+        std::cout << "[handle_amf_command] Extracted command name: '" << command_name << "'" << std::endl;
+        index += str_len;
+
+        found_command = true;
+    } else {
+        std::cerr << "[handle_amf_command] Error: Expected AMF0 string marker (0x02), got: " << std::hex << (unsigned int)marker << std::dec << std::endl;
+        return;
+    }
+
+    // Read the transaction ID
+    if (index + 1 > length) {
+        std::cerr << "[handle_amf_command] Error: Not enough data to read transaction ID marker." << std::endl;
+        return;
+    }
+
+    marker = (unsigned char)data[index];
+    if (marker == 0x00) { // AMF0 number marker
+        index++;
+        if (index + 8 > length) {
+            std::cerr << "[handle_amf_command] Error: Not enough data to read transaction ID." << std::endl;
+            return;
+        }
+
+        transaction_id = Parses::read_amf_number(data + index - 1);
+        std::cout << "[handle_amf_command] Extracted transaction ID: " << transaction_id << std::endl;
+        index += 8;
+    } else {
+        std::cerr << "[handle_amf_command] Error: Expected AMF0 number marker (0x00) for transaction ID, got: " << std::hex << (unsigned int)marker << std::dec << std::endl;
+        return;
+    }
 
     // Handle the extracted command
     if (command_name == "connect") {

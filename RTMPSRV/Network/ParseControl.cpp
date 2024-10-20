@@ -102,8 +102,9 @@ void ParseControl::handle_user_control_message(const char* data, std::size_t len
     }
 }
 
-// Function to send 'Window Acknowledgement Size' message to the client
 void ParseControl::send_window_ack_size(SOCKET client_socket, unsigned int size) {
+    std::cout << "[send_window_ack_size] Preparing message with window size: " << size << std::endl;
+    
     std::vector<char> message(16);  // 12-byte header + 4-byte window size
 
     // Prepare the RTMP header
@@ -111,11 +112,11 @@ void ParseControl::send_window_ack_size(SOCKET client_socket, unsigned int size)
     message[1] = 0x00;  // Timestamp (3 bytes)
     message[2] = 0x00;
     message[3] = 0x00;
-    message[4] = 0x00;  // Message length (4 bytes)
-    message[5] = 0x04;
-    message[6] = 0x05;  // Message Type ID: Window Acknowledgement Size
-    message[7] = 0x00;  // Message Stream ID (always 0 for control)
-    message[8] = 0x00;
+    message[4] = 0x00;  // Message length (3 bytes)
+    message[5] = 0x00;
+    message[6] = 0x04;  // Actual length is 4 bytes
+    message[7] = 0x05;  // Message Type ID: Window Acknowledgement Size
+    message[8] = 0x00;  // Message Stream ID (4 bytes, always 0 for control)
     message[9] = 0x00;
     message[10] = 0x00;
     message[11] = 0x00;
@@ -126,16 +127,26 @@ void ParseControl::send_window_ack_size(SOCKET client_socket, unsigned int size)
     message[14] = (size >> 8) & 0xFF;
     message[15] = size & 0xFF;
 
+    // Debug log the message content
+    std::cout << "[send_window_ack_size] Message content (hex): ";
+    for (size_t i = 0; i < message.size(); ++i) {
+        printf("%02X ", (unsigned char)message[i]);
+    }
+    std::cout << std::endl;
+
     // Send the message using the send utility function with retries
     if (!Parses::send_rtmp_message(client_socket, message)) {
-        std::cerr << "Failed to send Window Acknowledgement Size." << std::endl;
+        std::cerr << "[send_window_ack_size] ERROR: Failed to send Window Acknowledgement Size." << std::endl;
     } else {
-        std::cout << "Sent Window Acknowledgement Size to client." << std::endl;
+        std::cout << "[send_window_ack_size] Successfully sent Window Acknowledgement Size: " << size << " bytes" << std::endl;
     }
 }
 
 // Function to send 'Set Peer Bandwidth' message to the client
 void ParseControl::send_set_peer_bandwidth(SOCKET client_socket, unsigned int bandwidth, unsigned char limit_type) {
+    std::cout << "[send_set_peer_bandwidth] Preparing message with bandwidth: " << bandwidth 
+              << ", limit type: " << (int)limit_type << std::endl;
+    
     std::vector<char> message(17);  // 12-byte header + 4-byte bandwidth + 1-byte limit type
 
     // Prepare the RTMP header
@@ -143,11 +154,11 @@ void ParseControl::send_set_peer_bandwidth(SOCKET client_socket, unsigned int ba
     message[1] = 0x00;  // Timestamp (3 bytes)
     message[2] = 0x00;
     message[3] = 0x00;
-    message[4] = 0x00;  // Message length (5 bytes)
-    message[5] = 0x05;
-    message[6] = 0x06;  // Message Type ID: Set Peer Bandwidth
-    message[7] = 0x00;  // Message Stream ID (always 0 for control)
-    message[8] = 0x00;
+    message[4] = 0x00;  // Message length (3 bytes)
+    message[5] = 0x00;
+    message[6] = 0x05;  // Actual length is 5 bytes
+    message[7] = 0x06;  // Message Type ID: Set Peer Bandwidth
+    message[8] = 0x00;  // Message Stream ID (4 bytes, always 0 for control)
     message[9] = 0x00;
     message[10] = 0x00;
     message[11] = 0x00;
@@ -161,10 +172,40 @@ void ParseControl::send_set_peer_bandwidth(SOCKET client_socket, unsigned int ba
     // Limit type (1 byte)
     message[16] = limit_type;
 
+    // Debug log the message content
+    std::cout << "[send_set_peer_bandwidth] Message content (hex): ";
+    for (size_t i = 0; i < message.size(); ++i) {
+        printf("%02X ", (unsigned char)message[i]);
+    }
+    std::cout << std::endl;
+
+    // Validate limit type
+    if (limit_type > 2) {
+        std::cerr << "[send_set_peer_bandwidth] WARNING: Invalid limit type: " << (int)limit_type 
+                 << ". Should be 0 (Hard), 1 (Soft), or 2 (Dynamic)" << std::endl;
+    }
+
     // Send the message using the send utility function with retries
     if (!Parses::send_rtmp_message(client_socket, message)) {
-        std::cerr << "Failed to send Set Peer Bandwidth." << std::endl;
+        std::cerr << "[send_set_peer_bandwidth] ERROR: Failed to send Set Peer Bandwidth." << std::endl;
     } else {
-        std::cout << "Sent Set Peer Bandwidth to client." << std::endl;
+        std::cout << "[send_set_peer_bandwidth] Successfully sent Set Peer Bandwidth: " << bandwidth 
+                 << " bytes, limit type: " << (int)limit_type << std::endl;
+        
+        // Log the limit type meaning
+        switch(limit_type) {
+            case 0:
+                std::cout << "[send_set_peer_bandwidth] Limit type: Hard" << std::endl;
+                break;
+            case 1:
+                std::cout << "[send_set_peer_bandwidth] Limit type: Soft" << std::endl;
+                break;
+            case 2:
+                std::cout << "[send_set_peer_bandwidth] Limit type: Dynamic" << std::endl;
+                break;
+            default:
+                std::cout << "[send_set_peer_bandwidth] Limit type: Unknown" << std::endl;
+                break;
+        }
     }
 }
