@@ -52,7 +52,17 @@
         "iomanip": "cpp",
         "string": "cpp",
         "xlocmon": "cpp",
-        "xloctime": "cpp"
+        "xloctime": "cpp",
+        "charconv": "cpp",
+        "format": "cpp",
+        "locale": "cpp",
+        "xlocbuf": "cpp",
+        "xlocmes": "cpp",
+        "chrono": "cpp",
+        "forward_list": "cpp",
+        "optional": "cpp",
+        "sstream": "cpp",
+        "algorithm": "cpp"
     },
     "cmake.sourceDirectory": "D:/RTMPServer/RTMPSRV"
 }

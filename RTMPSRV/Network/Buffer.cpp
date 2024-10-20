@@ -1,8 +1,10 @@
 #include "Buffer.h"
 #include <iostream>
+#include <vector>
+#include <mutex>
 
 std::vector<char> Buffer::buffer_;
-std::mutex Buffer::buffer_mutex_;  // Define the mutex
+std::mutex Buffer::buffer_mutex_;
 
 void Buffer::store_data(const char* data, std::size_t length) {
     std::lock_guard<std::mutex> lock(buffer_mutex_);

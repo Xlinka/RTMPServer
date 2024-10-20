@@ -8,7 +8,7 @@
 #include <ctime>   // for time
 
 // Function to perform the RTMP handshake with the client
-bool Parses::perform_handshake(SOCKET client_socket) {
+bool Parse::perform_handshake(SOCKET client_socket) {
     char c0c1[1537]; // Buffer for C0 and C1
     char s0s1s2[3073]; // Buffer for S0, S1, S2
     char c2[1536]; // Buffer for C2
@@ -49,7 +49,7 @@ bool Parses::perform_handshake(SOCKET client_socket) {
 }
 
 // Function to parse RTMP packet data
-size_t Parses::parse_rtmp_packet(const char* data, std::size_t length, SOCKET client_socket) {
+size_t Parse::parse_rtmp_packet(const char* data, std::size_t length, SOCKET client_socket) {
     if (length < 1) {
         std::cerr << "Packet too small to be an RTMP command." << std::endl;
         return 0;
@@ -57,7 +57,7 @@ size_t Parses::parse_rtmp_packet(const char* data, std::size_t length, SOCKET cl
     size_t initial_length = length;
 
     // Debugging: Print the entire RTMP packet in hex
-    Parse::dump_hex(data, length);
+    Parses::dump_hex(data, length);
 
     // Extract the fmt and csid fields from the first byte
     unsigned char fmt = (data[0] & 0xC0) >> 6;

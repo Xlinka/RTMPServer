@@ -28,3 +28,5 @@ add_executable(RTMPServer ${SOURCES})
 if (WIN32)
     target_link_libraries(RTMPServer ws2_32)
 endif()
+
+
